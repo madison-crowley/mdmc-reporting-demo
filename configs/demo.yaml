@@ -1,0 +1,50 @@
+client:
+  id: demo
+  display_name: MDMC Demo Med Spa
+
+warehouse:
+  dataset_prefix: demo
+
+sources:
+  - name: ga4_sample
+    connector: ga4_bigquery_sample
+    params:
+      table_name: ga4_daily_web_analytics
+  - name: paid_media_demo
+    connector: synthetic_ads
+    params:
+      seed: 11
+      google_table_name: google_ads_campaigns
+      meta_table_name: meta_ads_campaigns
+  - name: bookings_demo
+    connector: synthetic_bookings
+    params:
+      seed: 29
+      table_name: booking_system_appointments
+
+transforms:
+  date_shift: true
+  reconciliation_threshold_pct: 10
+  rolling_window_days: 28
+
+quality:
+  checks:
+    freshness:
+      max_lag_days: 0
+    daily_performance_row_count:
+      min_rows: 90
+    reconciliation_row_count:
+      min_rows: 30
+    booking_funnel_row_count:
+      min_rows: 30
+    spend_anomaly:
+      stddev_multiplier: 2
+    reconciliation_flag_count:
+      max_warn_flags: 90
+  severity_overrides:
+    reconciliation_flag_count: WARN
+    spend_anomaly: WARN
+
+alerts:
+  github_issues: false
+  slack_webhook_env:
