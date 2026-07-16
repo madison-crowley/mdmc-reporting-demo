@@ -59,10 +59,10 @@ def _build_platform_rows(
     day = pd.to_datetime(ga4_day["source_date"].iloc[0]).date()
     matched_rows = ga4_day[ga4_day["campaign"].isin(exact_campaigns)].copy()
     matched_total = int(matched_rows["purchases"].sum())
-    delta_pct = _stable_ratio(seed, platform, day.isoformat(), "delta", minimum=0.03, maximum=0.08)
+    delta_pct = _stable_ratio(seed, platform, day.isoformat(), "delta", minimum=0.03, maximum=0.14)
     direction = 1 if _stable_int(seed, platform, day.isoformat(), "direction") % 2 == 0 else -1
 
-    # Keep platform-reported conversions within the requested 3-8% band vs matched GA4 purchases.
+    # Keep platform-reported conversions within the requested 3-14% band vs matched GA4 purchases.
     target_total = max(0, int(round(matched_total * (1 + (direction * delta_pct)))))
     matched_weights = [max(int(value), 1) for value in matched_rows["purchases"].tolist()]
     allocated_conversions = _allocate_whole_numbers(target_total, matched_weights)

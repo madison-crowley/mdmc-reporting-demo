@@ -67,6 +67,13 @@ def _discover_available_marts(warehouse, config: PipelineConfig) -> tuple[str, .
     return tuple(marts)
 
 
+def evaluate_freshness(max_date: date | None, expected_date: date, max_lag_days: int) -> tuple[int | None, bool]:
+    if max_date is None:
+        return None, False
+    lag_days = (expected_date - max_date).days
+    return lag_days, bool(0 <= lag_days <= max_lag_days)
+
+
 def run_quality_checks(warehouse, config: PipelineConfig, built_marts: tuple[str, ...] | None = None) -> tuple[list[QualityCheckResult], bool]:
     resolved_marts = built_marts or _discover_available_marts(warehouse, config)
     results: list[QualityCheckResult] = []
@@ -80,14 +87,14 @@ def run_quality_checks(warehouse, config: PipelineConfig, built_marts: tuple[str
         )
         expected_date = date.today() - timedelta(days=1)
         max_lag_days = _check_threshold(config, "freshness", "max_lag_days", 0)
-        lag_days = abs((expected_date - max_date).days) if max_date else None
+        lag_days, passed = evaluate_freshness(max_date, expected_date, max_lag_days)
         results.append(
             QualityCheckResult(
                 check="freshness",
                 severity=_severity_for(config, "freshness"),
                 value=max_date.isoformat() if max_date else None,
                 threshold={"expected_date": expected_date.isoformat(), "max_lag_days": max_lag_days},
-                passed=bool(lag_days is not None and lag_days <= max_lag_days),
+                passed=passed,
             )
         )
 

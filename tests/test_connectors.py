@@ -48,7 +48,7 @@ def test_synthetic_ads_are_deterministic_and_calibrated() -> None:
             .agg({"platform_reported_conversions": "sum", "purchases": "sum"})
         )
         discrepancy_pct = ((day_summary["platform_reported_conversions"] - day_summary["purchases"]).abs() / day_summary["purchases"]) * 100
-        assert discrepancy_pct.between(3.0, 8.0).all()
+        assert discrepancy_pct.between(3.0, 14.0).all()
 
 
 def test_synthetic_bookings_are_deterministic_and_include_walk_ins() -> None:

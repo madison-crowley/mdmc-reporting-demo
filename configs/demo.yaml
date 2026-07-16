@@ -24,7 +24,7 @@ sources:
 
 transforms:
   date_shift: true
-  reconciliation_threshold_pct: 10
+  reconciliation_threshold_pct: 8
   rolling_window_days: 28
 
 quality:

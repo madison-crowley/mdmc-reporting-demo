@@ -24,23 +24,48 @@ ${booking_system_union_sql}
   )
   GROUP BY 1, 2
 ),
-performance AS (
+spend_performance AS (
   SELECT
     date,
-    ROUND(SUM(spend), 2) AS spend,
-    SUM(ga4_sessions) AS ga4_sessions
+    ROUND(SUM(spend), 2) AS spend
   FROM `${daily_performance_table}`
   GROUP BY 1
+),
+web_analytics AS (
+  SELECT
+    DATE_ADD(source_date, INTERVAL (SELECT shift_days FROM shift) DAY) AS date,
+    source_date,
+    SUM(ga4_sessions) AS ga4_sessions
+  FROM (
+    SELECT
+      source_date,
+      sessions AS ga4_sessions
+    FROM (
+${web_analytics_union_sql}
+    )
+  )
+  GROUP BY 1, 2
+),
+dates AS (
+  SELECT date FROM spend_performance
+  UNION DISTINCT
+  SELECT date FROM web_analytics
+  UNION DISTINCT
+  SELECT date FROM bookings
 )
 SELECT
-  COALESCE(performance.date, bookings.date) AS date,
-  ROUND(COALESCE(performance.spend, 0), 2) AS spend,
-  COALESCE(performance.ga4_sessions, 0) AS ga4_sessions,
+  dates.date AS date,
+  ROUND(COALESCE(spend_performance.spend, 0), 2) AS spend,
+  COALESCE(web_analytics.ga4_sessions, 0) AS ga4_sessions,
   COALESCE(bookings.appointments_booked, 0) AS appointments_booked,
   COALESCE(bookings.appointments_completed, 0) AS appointments_completed,
   ROUND(COALESCE(bookings.booking_revenue, 0), 2) AS booking_revenue,
-  ROUND(SAFE_DIVIDE(performance.spend, NULLIF(bookings.appointments_booked, 0)), 2) AS cost_per_booking,
-  ROUND(SAFE_DIVIDE(bookings.booking_revenue, NULLIF(performance.spend, 0)), 4) AS revenue_per_spend_dollar
-FROM performance
-FULL OUTER JOIN bookings
-  ON performance.date = bookings.date
+  ROUND(SAFE_DIVIDE(spend_performance.spend, NULLIF(bookings.appointments_booked, 0)), 2) AS cost_per_booking,
+  ROUND(SAFE_DIVIDE(bookings.booking_revenue, NULLIF(spend_performance.spend, 0)), 4) AS revenue_per_spend_dollar
+FROM dates
+LEFT JOIN spend_performance
+  ON dates.date = spend_performance.date
+LEFT JOIN web_analytics
+  ON dates.date = web_analytics.date
+LEFT JOIN bookings
+  ON dates.date = bookings.date
