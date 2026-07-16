@@ -37,6 +37,53 @@ class QualityCheckResult:
     passed: bool
 
 
+def write_quality_report(
+    config: PipelineConfig | None,
+    results: list[QualityCheckResult],
+    *,
+    output_path: Path | None = None,
+    pipeline_status: str = "success",
+) -> Path:
+    artifacts_dir = Path("artifacts")
+    artifacts_dir.mkdir(exist_ok=True)
+    report_path = output_path or (artifacts_dir / "quality_report.json")
+    report_path.write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "client_id": config.client.id if config is not None else None,
+                "pipeline_status": pipeline_status,
+                "checks": [asdict(result) for result in results],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return report_path
+
+
+def build_pipeline_failure_result(message: str) -> QualityCheckResult:
+    return QualityCheckResult(
+        check="pipeline_execution",
+        severity="CRITICAL",
+        value=message,
+        threshold="successful pipeline execution",
+        passed=False,
+    )
+
+
+def load_quality_report(path: str | Path) -> dict[str, object]:
+    report_path = Path(path)
+    if not report_path.exists():
+        return {
+            "generated_at": None,
+            "client_id": None,
+            "pipeline_status": "missing",
+            "checks": [],
+        }
+    return json.loads(report_path.read_text(encoding="utf-8"))
+
+
 def _normalize_date(value: object) -> date | None:
     if value is None:
         return None
@@ -187,18 +234,6 @@ FROM scored
             )
         )
 
-    artifacts_dir = Path("artifacts")
-    artifacts_dir.mkdir(exist_ok=True)
-    report_path = artifacts_dir / "quality_report.json"
-    report_path.write_text(
-        json.dumps(
-            {
-                "generated_at": datetime.utcnow().isoformat() + "Z",
-                "checks": [asdict(result) for result in results],
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
     has_critical_failures = any(result.severity == "CRITICAL" and not result.passed for result in results)
+    write_quality_report(config, results, pipeline_status="failed" if has_critical_failures else "success")
     return results, has_critical_failures
