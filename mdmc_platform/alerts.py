@@ -69,6 +69,10 @@ def build_issue_title(client_id: str, report_date: str) -> str:
     return f"Pipeline alert — {client_id} — {report_date}"
 
 
+def _escape_markdown_table_value(value: object) -> str:
+    return str(value).replace("\r\n", "<br>").replace("\n", "<br>").replace("|", "\\|")
+
+
 def build_markdown_summary(client_id: str, pipeline_status: str, items: tuple[AlertCheck, ...]) -> str:
     lines = [
         f"# Pipeline alert for `{client_id}`",
@@ -79,7 +83,11 @@ def build_markdown_summary(client_id: str, pipeline_status: str, items: tuple[Al
         "| --- | --- | --- | --- |",
     ]
     for item in items:
-        lines.append(f"| `{item.check}` | `{item.severity}` | `{item.value}` | `{item.threshold}` |")
+        lines.append(
+            f"| `{item.check}` | `{item.severity}` | "
+            f"`{_escape_markdown_table_value(item.value)}` | "
+            f"`{_escape_markdown_table_value(item.threshold)}` |"
+        )
     return "\n".join(lines)
 
 

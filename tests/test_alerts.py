@@ -42,3 +42,24 @@ def test_build_markdown_summary_and_title_are_client_specific() -> None:
     assert title == "Pipeline alert — demo — 2026-07-16"
     assert "# Pipeline alert for `demo`" in body
     assert "| `freshness` | `CRITICAL` | `late` | `today` |" in body
+
+
+def test_build_markdown_summary_escapes_pipes_and_newlines() -> None:
+    report = {
+        "generated_at": "2026-07-16T07:00:00Z",
+        "checks": [
+            {
+                "check": "pipeline_execution",
+                "severity": "CRITICAL",
+                "value": "Unrecognized name: no_shows | field\nline 12",
+                "threshold": "successful | execution\nonly",
+                "passed": False,
+            },
+        ],
+    }
+    decision = summarize_alerts(report, "failure")
+
+    body = build_markdown_summary("demo", "failure", decision.items)
+
+    assert "Unrecognized name: no_shows \\| field<br>line 12" in body
+    assert "successful \\| execution<br>only" in body

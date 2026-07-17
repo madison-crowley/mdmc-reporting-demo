@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from mdmc_platform.auth import create_bigquery_client
 from mdmc_platform.config import PipelineConfig
-from mdmc_platform.transform import render_sql_template
+from mdmc_platform.transform import build_booking_window_sql, render_sql_template
 
 
 def parse_args() -> argparse.Namespace:
@@ -106,7 +106,11 @@ SELECT DATE '2021-01-02' AS source_date
         "reconciliation_threshold_pct": str(config.transforms.reconciliation_threshold_pct),
         "rolling_window_days": str(config.transforms.rolling_window_days),
         "rolling_window_days_minus_one": str(config.transforms.rolling_window_days - 1),
-        "booking_window_sql": "SELECT 12 AS appointments_booked, 2 AS no_shows",
+        "booking_window_sql": build_booking_window_sql(
+            "lint_daily_performance",
+            "lint_booking_funnel",
+            config.transforms.rolling_window_days,
+        ),
     }
 
 

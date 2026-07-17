@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mdmc_platform.transform import build_union_sql, planned_marts, render_sql_template
+from mdmc_platform.transform import (
+    build_booking_window_sql,
+    build_union_sql,
+    planned_marts,
+    render_sql_template,
+)
 
 
 def test_build_union_sql_joins_all_tables() -> None:
@@ -99,3 +104,39 @@ def test_booking_funnel_uses_all_web_analytics_sessions_for_daily_ga4_totals() -
     assert "web_analytics AS" in sql
     assert "sessions AS ga4_sessions" in sql
     assert "FROM `${daily_performance_table}`" not in sql.split("web_analytics AS", 1)[1].split("dates AS", 1)[0]
+
+
+def test_booking_funnel_renders_no_shows_in_final_select() -> None:
+    sql = render_sql_template(
+        "booking_funnel",
+        {
+            "daily_performance_table": "demo.demo_marts.daily_performance",
+            "web_analytics_union_sql": "SELECT * FROM `demo.demo_raw.ga4`",
+            "ad_platform_union_sql": "SELECT * FROM `demo.demo_raw.ads`",
+            "max_source_date_union_sql": "SELECT source_date FROM `demo.demo_raw.ga4`",
+            "date_shift_enabled": "TRUE",
+            "reconciliation_threshold_pct": "8",
+            "rolling_window_days": "28",
+            "rolling_window_days_minus_one": "27",
+            "reconciliation_table": "demo.demo_marts.reconciliation",
+            "booking_funnel_table": "demo.demo_marts.booking_funnel",
+            "kpi_summary_table": "demo.demo_marts.kpi_summary",
+            "booking_system_union_sql": "SELECT * FROM `demo.demo_raw.bookings`",
+            "booking_window_sql": "SELECT NULL AS appointments_booked, NULL AS no_shows",
+        },
+    )
+
+    assert "COALESCE(bookings.no_shows, 0) AS no_shows" in sql
+
+
+def test_shared_booking_window_sql_builder_targets_real_tables() -> None:
+    sql = build_booking_window_sql(
+        "demo.demo_marts.daily_performance",
+        "demo.demo_marts.booking_funnel",
+        28,
+    )
+
+    assert "SUM(appointments_booked) AS appointments_booked" in sql
+    assert "SUM(no_shows) AS no_shows" in sql
+    assert "FROM `demo.demo_marts.booking_funnel`" in sql
+    assert "MAX(date) FROM `demo.demo_marts.daily_performance`" in sql

@@ -57,6 +57,19 @@ SELECT
 """
 
 
+def build_booking_window_sql(
+    daily_performance_table: str,
+    booking_funnel_table: str,
+    rolling_window_days: int,
+) -> str:
+    return (
+        f"SELECT SUM(appointments_booked) AS appointments_booked, SUM(no_shows) AS no_shows "
+        f"FROM `{booking_funnel_table}` "
+        f"WHERE date >= DATE_SUB((SELECT MAX(date) FROM `{daily_performance_table}`), "
+        f"INTERVAL {rolling_window_days - 1} DAY)"
+    )
+
+
 def run_transforms(warehouse, config: PipelineConfig, extracts: list[ExtractResult]) -> TransformResult:
     category_tables: dict[str, list[str]] = {}
     for extract in extracts:
@@ -83,10 +96,11 @@ def run_transforms(warehouse, config: PipelineConfig, extracts: list[ExtractResu
         "rolling_window_days": str(config.transforms.rolling_window_days),
         "rolling_window_days_minus_one": str(config.transforms.rolling_window_days - 1),
         "booking_window_sql": (
-            f"SELECT SUM(appointments_booked) AS appointments_booked, SUM(no_shows) AS no_shows "
-            f"FROM `{config.mart_table_fqn('booking_funnel')}` "
-            f"WHERE date >= DATE_SUB((SELECT MAX(date) FROM `{config.mart_table_fqn('daily_performance')}`), "
-            f"INTERVAL {config.transforms.rolling_window_days - 1} DAY)"
+            build_booking_window_sql(
+                config.mart_table_fqn("daily_performance"),
+                config.mart_table_fqn("booking_funnel"),
+                config.transforms.rolling_window_days,
+            )
             if "booking_funnel" in built_marts
             else _empty_booking_window_sql()
         ),

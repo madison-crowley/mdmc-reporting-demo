@@ -59,6 +59,7 @@ SELECT
   COALESCE(web_analytics.ga4_sessions, 0) AS ga4_sessions,
   COALESCE(bookings.appointments_booked, 0) AS appointments_booked,
   COALESCE(bookings.appointments_completed, 0) AS appointments_completed,
+  COALESCE(bookings.no_shows, 0) AS no_shows,
   ROUND(COALESCE(bookings.booking_revenue, 0), 2) AS booking_revenue,
   ROUND(SAFE_DIVIDE(spend_performance.spend, NULLIF(bookings.appointments_booked, 0)), 2) AS cost_per_booking,
   ROUND(SAFE_DIVIDE(bookings.booking_revenue, NULLIF(spend_performance.spend, 0)), 4) AS revenue_per_spend_dollar
