@@ -48,6 +48,44 @@ def test_daily_performance_sql_renders_required_context() -> None:
     assert "demo.demo_raw.ga4" in sql
 
 
+def test_reconciliation_scopes_ga4_purchases_to_each_platforms_matched_campaigns() -> None:
+    overlapping_daily_performance = [
+        {"date": "2021-01-01", "platform": "Google Ads", "campaign": "Shared Campaign", "ga4_purchases": 12},
+        {"date": "2021-01-01", "platform": "Meta Ads", "campaign": "Shared Campaign", "ga4_purchases": 12},
+    ]
+    naive_unscoped_total = sum(row["ga4_purchases"] for row in overlapping_daily_performance)
+    assert naive_unscoped_total == 24
+
+    google_matched_campaigns = ["Shared Campaign", "Google Only Campaign"]
+    meta_matched_campaigns = ["Shared Campaign", "Meta Only Campaign"]
+    assert google_matched_campaigns != meta_matched_campaigns
+
+    sql = render_sql_template(
+        "reconciliation",
+        {
+            "daily_performance_table": "demo.demo_marts.daily_performance",
+            "web_analytics_union_sql": "SELECT * FROM `demo.demo_raw.ga4`",
+            "ad_platform_union_sql": "SELECT * FROM `demo.demo_raw.ads`",
+            "max_source_date_union_sql": "SELECT source_date FROM `demo.demo_raw.ga4`",
+            "date_shift_enabled": "TRUE",
+            "reconciliation_threshold_pct": "8",
+            "rolling_window_days": "28",
+            "rolling_window_days_minus_one": "27",
+            "reconciliation_table": "demo.demo_marts.reconciliation",
+            "booking_funnel_table": "demo.demo_marts.booking_funnel",
+            "kpi_summary_table": "demo.demo_marts.kpi_summary",
+            "booking_system_union_sql": "SELECT * FROM `demo.demo_raw.bookings`",
+            "booking_window_sql": "SELECT NULL AS appointments_booked, NULL AS no_shows",
+        },
+    )
+
+    assert "FROM ad_platform AS a" in sql
+    assert "LEFT JOIN web_analytics AS w" in sql
+    assert "LOWER(a.campaign) = LOWER(w.campaign)" in sql
+    assert "FROM scoped_performance" in sql
+    assert "FROM `${daily_performance_table}`" not in sql
+
+
 def test_kpi_summary_uses_web_analytics_union_for_ga4_totals_instead_of_daily_performance_duplicates() -> None:
     overlapping_daily_performance = [
         {"date": "2021-01-01", "platform": "Google Ads", "campaign": "Holiday Search", "ga4_sessions": 120, "ga4_purchases": 10, "ga4_revenue": 200.0},
