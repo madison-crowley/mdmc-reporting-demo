@@ -28,11 +28,12 @@ ad_platform AS (
     source_date,
     platform,
     campaign_name AS campaign,
+    matched_ga4_campaign,
     SUM(platform_reported_conversions) AS platform_conversions
   FROM (
 ${ad_platform_union_sql}
   )
-  GROUP BY 1, 2, 3, 4
+  GROUP BY 1, 2, 3, 4, 5
 ),
 scoped_performance AS (
   SELECT
@@ -43,7 +44,7 @@ scoped_performance AS (
   FROM ad_platform AS a
   LEFT JOIN web_analytics AS w
     ON a.date = w.date
-   AND LOWER(a.campaign) = LOWER(w.campaign)
+   AND LOWER(a.matched_ga4_campaign) = LOWER(w.campaign)
 )
 SELECT
   date,

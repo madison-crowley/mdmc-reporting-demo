@@ -14,11 +14,28 @@ AD_PLATFORM_SCHEMA = [
     ("date", "DATE"),
     ("platform", "STRING"),
     ("campaign_name", "STRING"),
+    ("matched_ga4_campaign", "STRING"),
     ("impressions", "INT64"),
     ("clicks", "INT64"),
     ("spend", "FLOAT64"),
     ("platform_reported_conversions", "INT64"),
 ]
+
+
+PAID_DISPLAY_NAMES = {
+    "Google Ads": (
+        "Search | Brand Core",
+        "Search | High Intent",
+        "PMax | Evergreen",
+        "YouTube | Treatment Education",
+    ),
+    "Meta Ads": (
+        "Meta | Prospecting Q3",
+        "Meta | Retarget 30d",
+        "Meta | Lookalike Growth",
+        "Meta | Treatment Education",
+    ),
+}
 
 
 def _stable_int(*parts: object) -> int:
@@ -48,16 +65,24 @@ def _allocate_whole_numbers(total: int, weights: list[float]) -> list[int]:
     return floored
 
 
+def _build_display_name_map(platform: str, seed: int, ga4_campaigns: list[str]) -> dict[str, str]:
+    display_names = sorted(
+        PAID_DISPLAY_NAMES[platform],
+        key=lambda name: _stable_int(seed, platform, name, "display-name"),
+    )
+    return dict(zip(ga4_campaigns, display_names))
+
+
 def _build_platform_rows(
     *,
     ga4_day: pd.DataFrame,
     platform: str,
     seed: int,
-    exact_campaigns: list[str],
+    matched_campaigns: dict[str, str],
     unmatched_campaigns: list[str],
 ) -> list[dict[str, object]]:
     day = pd.to_datetime(ga4_day["source_date"].iloc[0]).date()
-    matched_rows = ga4_day[ga4_day["campaign"].isin(exact_campaigns)].copy()
+    matched_rows = ga4_day[ga4_day["campaign"].isin(matched_campaigns)].copy()
     matched_total = int(matched_rows["purchases"].sum())
     delta_pct = _stable_ratio(seed, platform, day.isoformat(), "delta", minimum=0.03, maximum=0.14)
     direction = 1 if _stable_int(seed, platform, day.isoformat(), "direction") % 2 == 0 else -1
@@ -69,10 +94,14 @@ def _build_platform_rows(
 
     rows: list[dict[str, object]] = []
     for (_, source_row), conversions in zip(matched_rows.iterrows(), allocated_conversions):
-        campaign = str(source_row["campaign"])
-        ctr = _stable_ratio(seed, platform, campaign, day.isoformat(), "ctr", minimum=0.02, maximum=0.065)
-        cpc = _stable_ratio(seed, platform, campaign, day.isoformat(), "cpc", minimum=1.6, maximum=4.9)
-        clicks = max(conversions * (3 + (_stable_int(seed, campaign, day.isoformat(), "click-multiplier") % 5)), 12)
+        ga4_campaign = str(source_row["campaign"])
+        campaign_name = matched_campaigns[ga4_campaign]
+        ctr = _stable_ratio(seed, platform, campaign_name, day.isoformat(), "ctr", minimum=0.02, maximum=0.065)
+        cpc = _stable_ratio(seed, platform, campaign_name, day.isoformat(), "cpc", minimum=1.6, maximum=4.9)
+        clicks = max(
+            conversions * (3 + (_stable_int(seed, campaign_name, day.isoformat(), "click-multiplier") % 5)),
+            12,
+        )
         impressions = int(round(clicks / ctr))
         spend = round(clicks * cpc, 2)
         rows.append(
@@ -80,7 +109,8 @@ def _build_platform_rows(
                 "source_date": day,
                 "date": day,
                 "platform": platform,
-                "campaign_name": campaign,
+                "campaign_name": campaign_name,
+                "matched_ga4_campaign": ga4_campaign,
                 "impressions": impressions,
                 "clicks": clicks,
                 "spend": spend,
@@ -100,6 +130,7 @@ def _build_platform_rows(
                 "date": day,
                 "platform": platform,
                 "campaign_name": campaign,
+                "matched_ga4_campaign": None,
                 "impressions": impressions,
                 "clicks": clicks,
                 "spend": spend,
@@ -110,7 +141,12 @@ def _build_platform_rows(
 
 
 def generate_synthetic_ads(ga4_frame: pd.DataFrame, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Generate deterministic demo-only ad-platform extracts from GA4 campaign demand."""
+    """Generate deterministic demo-only ad-platform extracts from GA4 campaign demand.
+
+    Paid display names are part of the declared-synthetic ad feed. The nullable
+    ``matched_ga4_campaign`` field preserves full transparency about which raw
+    GA4 campaign slice each synthetic paid campaign maps to.
+    """
 
     normalized = ga4_frame.copy()
     normalized["source_date"] = pd.to_datetime(normalized["source_date"]).dt.date
@@ -124,12 +160,14 @@ def generate_synthetic_ads(ga4_frame: pd.DataFrame, seed: int) -> tuple[pd.DataF
     top_campaigns = (
         grouped.groupby("campaign", as_index=False)["purchases"]
         .sum()
-        .sort_values("purchases", ascending=False)["campaign"]
+        .sort_values(["purchases", "campaign"], ascending=[False, True])["campaign"]
         .tolist()
     )
-    top_campaigns = [campaign for campaign in top_campaigns if campaign != "(not set)"][:6]
+    top_campaigns = top_campaigns[:6]
     google_exact = top_campaigns[:4]
     meta_exact = top_campaigns[2:6] if len(top_campaigns) >= 6 else top_campaigns[:4]
+    google_matched_campaigns = _build_display_name_map("Google Ads", seed, google_exact)
+    meta_matched_campaigns = _build_display_name_map("Meta Ads", seed + 17, meta_exact)
 
     google_rows: list[dict[str, object]] = []
     meta_rows: list[dict[str, object]] = []
@@ -139,7 +177,7 @@ def generate_synthetic_ads(ga4_frame: pd.DataFrame, seed: int) -> tuple[pd.DataF
                 ga4_day=ga4_day,
                 platform="Google Ads",
                 seed=seed,
-                exact_campaigns=google_exact,
+                matched_campaigns=google_matched_campaigns,
                 unmatched_campaigns=["Search | Brand Protect", "YouTube | Local Reach"],
             )
         )
@@ -148,7 +186,7 @@ def generate_synthetic_ads(ga4_frame: pd.DataFrame, seed: int) -> tuple[pd.DataF
                 ga4_day=ga4_day,
                 platform="Meta Ads",
                 seed=seed + 17,
-                exact_campaigns=meta_exact,
+                matched_campaigns=meta_matched_campaigns,
                 unmatched_campaigns=["Meta | Retargeting Burst", "Meta | Walk-In Awareness"],
             )
         )

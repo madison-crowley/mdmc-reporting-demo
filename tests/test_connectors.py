@@ -5,7 +5,7 @@ from datetime import date
 import pandas as pd
 
 from mdmc_platform.connectors import CONNECTOR_REGISTRY
-from mdmc_platform.connectors.synthetic_ads import generate_synthetic_ads
+from mdmc_platform.connectors.synthetic_ads import AD_PLATFORM_SCHEMA, generate_synthetic_ads
 from mdmc_platform.connectors.synthetic_bookings import generate_synthetic_bookings
 
 
@@ -36,10 +36,11 @@ def test_synthetic_ads_are_deterministic_and_calibrated() -> None:
     pd.testing.assert_frame_equal(first_meta, second_meta)
 
     for platform_frame in (first_google, first_meta):
-        matched_conversions = platform_frame[platform_frame["platform_reported_conversions"] > 0]
-        merged = matched_conversions.merge(
+        assert platform_frame.columns.tolist() == [name for name, _ in AD_PLATFORM_SCHEMA]
+        matched_rows = platform_frame[platform_frame["matched_ga4_campaign"].notna()]
+        merged = matched_rows.merge(
             ga4_frame,
-            left_on=["source_date", "campaign_name"],
+            left_on=["source_date", "matched_ga4_campaign"],
             right_on=["source_date", "campaign"],
             how="left",
         )
@@ -49,6 +50,26 @@ def test_synthetic_ads_are_deterministic_and_calibrated() -> None:
         )
         discrepancy_pct = ((day_summary["platform_reported_conversions"] - day_summary["purchases"]).abs() / day_summary["purchases"]) * 100
         assert discrepancy_pct.between(3.0, 14.0).all()
+
+
+def test_synthetic_ads_use_paid_display_names_and_preserve_ga4_scoping_keys() -> None:
+    bucket_campaigns = ["(organic)", "(direct)", "(referral)", "(data deleted)", "(not set)", "(other)"]
+    ga4_frame = pd.DataFrame(
+        [
+            {"source_date": date(2021, 1, 1), "campaign": campaign, "purchases": purchases}
+            for campaign, purchases in zip(bucket_campaigns, range(60, 0, -10))
+        ]
+    )
+
+    google_frame, meta_frame = generate_synthetic_ads(ga4_frame, seed=11)
+
+    for platform_frame in (google_frame, meta_frame):
+        matched_rows = platform_frame[platform_frame["matched_ga4_campaign"].notna()]
+        unmatched_rows = platform_frame[platform_frame["matched_ga4_campaign"].isna()]
+        assert set(matched_rows["matched_ga4_campaign"]) <= set(bucket_campaigns)
+        assert not set(matched_rows["campaign_name"]) & set(bucket_campaigns)
+        assert (matched_rows["campaign_name"] != matched_rows["matched_ga4_campaign"]).all()
+        assert not unmatched_rows.empty
 
 
 def test_synthetic_bookings_are_deterministic_and_include_walk_ins() -> None:

@@ -46,6 +46,8 @@ def test_daily_performance_sql_renders_required_context() -> None:
     assert "CREATE OR REPLACE TABLE `demo.demo_marts.daily_performance`" in sql
     assert "DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)" in sql
     assert "demo.demo_raw.ga4" in sql
+    assert "campaign_name AS campaign" in sql
+    assert "LOWER(a.matched_ga4_campaign) = LOWER(w.campaign)" in sql
 
 
 def test_reconciliation_scopes_ga4_purchases_to_each_platforms_matched_campaigns() -> None:
@@ -81,7 +83,7 @@ def test_reconciliation_scopes_ga4_purchases_to_each_platforms_matched_campaigns
 
     assert "FROM ad_platform AS a" in sql
     assert "LEFT JOIN web_analytics AS w" in sql
-    assert "LOWER(a.campaign) = LOWER(w.campaign)" in sql
+    assert "LOWER(a.matched_ga4_campaign) = LOWER(w.campaign)" in sql
     assert "FROM scoped_performance" in sql
     assert "FROM `${daily_performance_table}`" not in sql
 

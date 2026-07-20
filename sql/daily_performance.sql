@@ -30,6 +30,7 @@ ad_platform AS (
     source_date,
     platform,
     campaign_name AS campaign,
+    matched_ga4_campaign,
     SUM(spend) AS spend,
     SUM(clicks) AS clicks,
     SUM(impressions) AS impressions,
@@ -37,7 +38,7 @@ ad_platform AS (
   FROM (
 ${ad_platform_union_sql}
   )
-  GROUP BY 1, 2, 3, 4
+  GROUP BY 1, 2, 3, 4, 5
 )
 SELECT
   a.date,
@@ -55,4 +56,4 @@ SELECT
 FROM ad_platform AS a
 LEFT JOIN web_analytics AS w
   ON a.date = w.date
- AND LOWER(a.campaign) = LOWER(w.campaign)
+ AND LOWER(a.matched_ga4_campaign) = LOWER(w.campaign)
