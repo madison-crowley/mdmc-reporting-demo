@@ -26,6 +26,20 @@ def build_source_date_union_sql(table_fqns: list[str]) -> str:
     return "\nUNION ALL\n".join(f"SELECT source_date FROM `{table_fqn}`" for table_fqn in table_fqns)
 
 
+def build_source_max_date_union_sql(category_tables: dict[str, list[str]]) -> str:
+    queries = []
+    for source_category in sorted(category_tables):
+        tables = category_tables[source_category]
+        if not tables:
+            continue
+        queries.append(
+            f"SELECT '{source_category}' AS source_category, "
+            f"MAX(DATE_ADD(source_date, INTERVAL (SELECT shift_days FROM shift) DAY)) AS max_date "
+            f"FROM (\n{build_union_sql(tables)}\n)"
+        )
+    return "\nUNION ALL\n".join(queries)
+
+
 def render_sql_template(template_name: str, context: dict[str, str]) -> str:
     template = Template((SQL_DIR / f"{template_name}.sql").read_text(encoding="utf-8"))
     return template.substitute(context)
@@ -62,11 +76,12 @@ def build_booking_window_sql(
     booking_funnel_table: str,
     rolling_window_days: int,
 ) -> str:
+    del daily_performance_table, rolling_window_days
     return (
         f"SELECT SUM(appointments_booked) AS appointments_booked, SUM(no_shows) AS no_shows "
         f"FROM `{booking_funnel_table}` "
-        f"WHERE date >= DATE_SUB((SELECT MAX(date) FROM `{daily_performance_table}`), "
-        f"INTERVAL {rolling_window_days - 1} DAY)"
+        f"WHERE date BETWEEN (SELECT window_start FROM watermark) "
+        f"AND (SELECT window_end FROM watermark)"
     )
 
 
@@ -91,6 +106,7 @@ def run_transforms(warehouse, config: PipelineConfig, extracts: list[ExtractResu
         "ad_platform_union_sql": build_union_sql(category_tables.get("ad_platform", [])),
         "booking_system_union_sql": build_union_sql(category_tables.get("booking_system", [])),
         "max_source_date_union_sql": build_source_date_union_sql(all_source_tables),
+        "source_max_date_union_sql": build_source_max_date_union_sql(category_tables),
         "date_shift_enabled": "TRUE" if config.transforms.date_shift else "FALSE",
         "reconciliation_threshold_pct": str(config.transforms.reconciliation_threshold_pct),
         "rolling_window_days": str(config.transforms.rolling_window_days),

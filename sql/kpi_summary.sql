@@ -11,15 +11,26 @@ WITH shift AS (
 ${max_source_date_union_sql}
   )
 ),
+source_max_dates AS (
+${source_max_date_union_sql}
+),
+watermark AS (
+  SELECT
+    DATE_SUB(
+      IF(COUNTIF(max_date IS NULL) > 0, NULL, MIN(max_date)),
+      INTERVAL ${rolling_window_days_minus_one} DAY
+    ) AS window_start,
+    IF(COUNTIF(max_date IS NULL) > 0, NULL, MIN(max_date)) AS window_end
+  FROM source_max_dates
+),
 performance_window AS (
-  SELECT *
-  FROM `${daily_performance_table}`
-  WHERE date >= DATE_SUB((SELECT MAX(date) FROM `${daily_performance_table}`), INTERVAL ${rolling_window_days_minus_one} DAY)
+  SELECT performance.*
+  FROM `${daily_performance_table}` AS performance
+  CROSS JOIN watermark
+  WHERE performance.date BETWEEN watermark.window_start AND watermark.window_end
 ),
 performance_summary AS (
   SELECT
-    MIN(date) AS window_start,
-    MAX(date) AS window_end,
     ROUND(SUM(spend), 2) AS spend,
     SUM(clicks) AS clicks,
     SUM(impressions) AS impressions,
@@ -42,7 +53,7 @@ web_analytics_window AS (
 ${web_analytics_union_sql}
     )
   ) AS shifted_web_analytics
-  WHERE shifted_web_analytics.date >= DATE_SUB((SELECT MAX(date) FROM `${daily_performance_table}`), INTERVAL ${rolling_window_days_minus_one} DAY)
+  WHERE shifted_web_analytics.date BETWEEN (SELECT window_start FROM watermark) AND (SELECT window_end FROM watermark)
   GROUP BY 1
 ),
 web_analytics_summary AS (
@@ -55,7 +66,7 @@ web_analytics_summary AS (
 reconciliation_window AS (
   SELECT *
   FROM `${reconciliation_table}`
-  WHERE date >= DATE_SUB((SELECT MAX(date) FROM `${reconciliation_table}`), INTERVAL ${rolling_window_days_minus_one} DAY)
+  WHERE date BETWEEN (SELECT window_start FROM watermark) AND (SELECT window_end FROM watermark)
 ),
 booking_window AS (
 ${booking_window_sql}
@@ -66,8 +77,8 @@ reconciliation_summary AS (
 )
 SELECT
   ${rolling_window_days} AS rolling_window_days,
-  performance_summary.window_start AS window_start,
-  performance_summary.window_end AS window_end,
+  watermark.window_start AS window_start,
+  watermark.window_end AS window_end,
   performance_summary.spend AS spend,
   performance_summary.clicks AS clicks,
   performance_summary.impressions AS impressions,
@@ -79,6 +90,7 @@ SELECT
   ROUND(SAFE_DIVIDE(booking_window.no_shows, NULLIF(booking_window.appointments_booked, 0)), 4) AS no_show_rate,
   reconciliation_summary.reconciliation_flag_count AS reconciliation_flag_count
 FROM performance_summary
+CROSS JOIN watermark
 CROSS JOIN web_analytics_summary
 CROSS JOIN booking_window
 CROSS JOIN reconciliation_summary

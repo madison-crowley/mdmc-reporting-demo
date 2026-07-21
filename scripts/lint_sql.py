@@ -14,7 +14,66 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from mdmc_platform.auth import create_bigquery_client
 from mdmc_platform.config import PipelineConfig
+from mdmc_platform.connectors.ga4_bigquery_sample import build_ga4_extraction_query
 from mdmc_platform.transform import build_booking_window_sql, render_sql_template
+
+
+MART_FIXTURE_SQL = {
+    "daily_performance": """
+SELECT
+  DATE '2021-01-01' AS date,
+  'Google Ads' AS platform,
+  'Search | Brand Core' AS campaign,
+  CAST(400.0 AS FLOAT64) AS spend,
+  CAST(250 AS INT64) AS clicks,
+  CAST(10000 AS INT64) AS impressions,
+  CAST(120 AS INT64) AS ga4_sessions,
+  CAST(10 AS INT64) AS ga4_purchases,
+  CAST(250.0 AS FLOAT64) AS ga4_revenue,
+  CAST(11 AS INT64) AS platform_conversions,
+  CAST(40.0 AS FLOAT64) AS cpa,
+  CAST(0.625 AS FLOAT64) AS roas
+""".strip(),
+    "reconciliation": """
+SELECT
+  DATE '2021-01-01' AS date,
+  'Google Ads' AS platform,
+  CAST(10 AS INT64) AS ga4_purchases,
+  CAST(11 AS INT64) AS platform_conversions,
+  CAST(1 AS INT64) AS absolute_discrepancy,
+  CAST(10.0 AS FLOAT64) AS discrepancy_pct,
+  'normal' AS baseline_status,
+  FALSE AS is_flagged
+""".strip(),
+    "booking_funnel": """
+SELECT
+  DATE '2021-01-01' AS date,
+  CAST(400.0 AS FLOAT64) AS spend,
+  CAST(120 AS INT64) AS ga4_sessions,
+  CAST(12 AS INT64) AS appointments_booked,
+  CAST(10 AS INT64) AS appointments_completed,
+  CAST(2 AS INT64) AS no_shows,
+  CAST(1400.0 AS FLOAT64) AS booking_revenue,
+  CAST(33.33 AS FLOAT64) AS cost_per_booking,
+  CAST(3.5 AS FLOAT64) AS revenue_per_spend_dollar
+""".strip(),
+    "kpi_summary": """
+SELECT
+  CAST(28 AS INT64) AS rolling_window_days,
+  DATE '2020-12-05' AS window_start,
+  DATE '2021-01-01' AS window_end,
+  CAST(400.0 AS FLOAT64) AS spend,
+  CAST(250 AS INT64) AS clicks,
+  CAST(10000 AS INT64) AS impressions,
+  CAST(120 AS INT64) AS ga4_sessions,
+  CAST(10 AS INT64) AS ga4_purchases,
+  CAST(250.0 AS FLOAT64) AS ga4_revenue,
+  CAST(11 AS INT64) AS platform_conversions,
+  CAST(33.33 AS FLOAT64) AS cost_per_booking,
+  CAST(0.1667 AS FLOAT64) AS no_show_rate,
+  CAST(1 AS INT64) AS reconciliation_flag_count
+""".strip(),
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,42 +109,18 @@ SELECT
   70 AS engaged_sessions,
   10 AS purchases,
   250.0 AS purchase_revenue
-UNION ALL
-SELECT
-  DATE '2021-01-01',
-  DATE '2021-01-01',
-  'facebook',
-  'paid_social',
-  'Injectables Promo',
-  90,
-  68,
-  20,
-  55,
-  8,
-  180.0
 """.strip(),
         "ad_platform_union_sql": """
 SELECT
   DATE '2021-01-01' AS source_date,
   DATE '2021-01-01' AS date,
   'Google Ads' AS platform,
-  'Holiday Search' AS campaign_name,
+  'Search | Brand Core' AS campaign_name,
   'Holiday Search' AS matched_ga4_campaign,
   10000 AS impressions,
   250 AS clicks,
   400.0 AS spend,
   11 AS platform_reported_conversions
-UNION ALL
-SELECT
-  DATE '2021-01-01',
-  DATE '2021-01-01',
-  'Meta Ads',
-  'Injectables Promo',
-  'Injectables Promo',
-  9000,
-  220,
-  360.0,
-  7
 """.strip(),
         "booking_system_union_sql": """
 SELECT
@@ -99,10 +134,13 @@ SELECT
   1400.0 AS booking_revenue,
   'google / cpc' AS acquisition_channel
 """.strip(),
-        "max_source_date_union_sql": """
-SELECT DATE '2021-01-01' AS source_date
+        "max_source_date_union_sql": "SELECT DATE '2021-01-01' AS source_date",
+        "source_max_date_union_sql": """
+SELECT 'ad_platform' AS source_category, DATE '2021-01-01' AS max_date
 UNION ALL
-SELECT DATE '2021-01-02' AS source_date
+SELECT 'booking_system', DATE '2021-01-01'
+UNION ALL
+SELECT 'web_analytics', DATE '2021-01-01'
 """.strip(),
         "date_shift_enabled": "TRUE" if config.transforms.date_shift else "FALSE",
         "reconciliation_threshold_pct": str(config.transforms.reconciliation_threshold_pct),
@@ -116,27 +154,45 @@ SELECT DATE '2021-01-02' AS source_date
     }
 
 
-def build_lint_script(config: PipelineConfig) -> str:
+def _inline_dependencies(query: str) -> str:
+    replacements = {
+        "lint_daily_performance": MART_FIXTURE_SQL["daily_performance"],
+        "lint_reconciliation": MART_FIXTURE_SQL["reconciliation"],
+        "lint_booking_funnel": MART_FIXTURE_SQL["booking_funnel"],
+    }
+    fixture_ctes = []
+    for table_name, fixture_sql in replacements.items():
+        quoted_table = f"`{table_name}`"
+        if quoted_table not in query:
+            continue
+        query = query.replace(quoted_table, table_name)
+        fixture_ctes.append(f"{table_name} AS (\n{fixture_sql}\n)")
+    if not fixture_ctes:
+        return query
+    stripped_query = query.lstrip()
+    if not stripped_query.upper().startswith("WITH "):
+        raise ValueError("Expected rendered mart query to begin with WITH.")
+    return "WITH\n" + ",\n".join(fixture_ctes) + ",\n" + stripped_query[5:]
+
+
+def build_lint_queries(config: PipelineConfig) -> dict[str, str]:
     context = build_lint_context(config)
-    daily_performance_sql = strip_create_prefix(render_sql_template("daily_performance", context))
-    reconciliation_sql = strip_create_prefix(render_sql_template("reconciliation", context))
-    booking_funnel_sql = strip_create_prefix(render_sql_template("booking_funnel", context))
-    kpi_summary_sql = strip_create_prefix(render_sql_template("kpi_summary", context))
-    return f"""
-CREATE TEMP TABLE lint_daily_performance AS
-{daily_performance_sql};
+    queries = {
+        mart: _inline_dependencies(strip_create_prefix(render_sql_template(mart, context)))
+        for mart in ("daily_performance", "reconciliation", "booking_funnel", "kpi_summary")
+    }
+    queries["ga4_extraction"] = build_ga4_extraction_query()
+    return queries
 
-CREATE TEMP TABLE lint_reconciliation AS
-{reconciliation_sql};
 
-CREATE TEMP TABLE lint_booking_funnel AS
-{booking_funnel_sql};
-
-CREATE TEMP TABLE lint_kpi_summary AS
-{kpi_summary_sql};
-
-SELECT 1;
-""".strip()
+def dry_run_queries(client, queries: dict[str, str]) -> None:
+    job_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+    for query_name, query in queries.items():
+        try:
+            client.query(query, job_config=job_config).result()
+        except Exception as exc:
+            raise RuntimeError(f"BigQuery dry-run failed for {query_name}: {exc}") from exc
+        logging.getLogger(__name__).info("BigQuery dry-run lint succeeded for %s.", query_name)
 
 
 def main() -> int:
@@ -144,9 +200,7 @@ def main() -> int:
     args = parse_args()
     config = PipelineConfig.load(args.config)
     client = create_bigquery_client(config.project_id)
-    dry_run_script = build_lint_script(config)
-    client.query(dry_run_script, job_config=bigquery.QueryJobConfig(dry_run=True, use_query_cache=False))
-    logging.getLogger(__name__).info("BigQuery dry-run lint succeeded for %s.", args.config)
+    dry_run_queries(client, build_lint_queries(config))
     return 0
 
 

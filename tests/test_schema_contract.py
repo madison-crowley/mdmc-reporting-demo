@@ -29,6 +29,7 @@ MART_SCHEMA_CONTRACT = {
         "platform_conversions",
         "absolute_discrepancy",
         "discrepancy_pct",
+        "baseline_status",
         "is_flagged",
     ],
     "booking_funnel": [
@@ -65,6 +66,7 @@ RENDER_CONTEXT = {
     "web_analytics_union_sql": "SELECT * FROM `demo.demo_raw.ga4`",
     "ad_platform_union_sql": "SELECT * FROM `demo.demo_raw.ads`",
     "max_source_date_union_sql": "SELECT source_date FROM `demo.demo_raw.ga4`",
+    "source_max_date_union_sql": "SELECT 'web_analytics' AS source_category, DATE '2021-01-01' AS max_date",
     "date_shift_enabled": "TRUE",
     "reconciliation_threshold_pct": "8",
     "rolling_window_days": "28",

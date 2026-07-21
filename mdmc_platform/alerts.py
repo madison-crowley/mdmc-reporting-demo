@@ -65,17 +65,24 @@ def summarize_alerts(report: dict[str, Any], pipeline_status: str) -> AlertDecis
     )
 
 
-def build_issue_title(client_id: str, report_date: str) -> str:
-    return f"Pipeline alert — {client_id} — {report_date}"
+def build_issue_title(client_id: str) -> str:
+    return f"Pipeline alert — {client_id}"
 
 
 def _escape_markdown_table_value(value: object) -> str:
     return str(value).replace("\r\n", "<br>").replace("\n", "<br>").replace("|", "\\|")
 
 
-def build_markdown_summary(client_id: str, pipeline_status: str, items: tuple[AlertCheck, ...]) -> str:
+def build_markdown_summary(
+    client_id: str,
+    pipeline_status: str,
+    items: tuple[AlertCheck, ...],
+    report_date: str | None = None,
+) -> str:
     lines = [
         f"# Pipeline alert for `{client_id}`",
+        "",
+        f"Run date: `{report_date or 'unknown'}`",
         "",
         f"Pipeline status: `{pipeline_status}`",
         "",
@@ -139,21 +146,49 @@ def list_open_pipeline_alert_issues(repository: str, token: str, client_id: str)
         f"https://api.github.com/repos/{repository}/issues?state=open&labels={PIPELINE_ALERT_LABEL}&per_page=100",
         token,
     )
-    title_prefix = f"Pipeline alert — {client_id} — "
-    return [issue for issue in issues if str(issue.get("title", "")).startswith(title_prefix)]
+    stable_title = build_issue_title(client_id)
+    legacy_prefix = f"{stable_title} — "
+    return [
+        issue
+        for issue in issues
+        if str(issue.get("title", "")) == stable_title
+        or str(issue.get("title", "")).startswith(legacy_prefix)
+    ]
 
 
 def create_or_update_issue(repository: str, token: str, client_id: str, title: str, body: str) -> None:
     ensure_label(repository, token)
     existing_issues = list_open_pipeline_alert_issues(repository, token, client_id)
     match = next((issue for issue in existing_issues if issue.get("title") == title), None)
+    match = match or (existing_issues[0] if existing_issues else None)
     if match is not None:
         _github_request(
             "PATCH",
             f"https://api.github.com/repos/{repository}/issues/{match['number']}",
             token,
-            {"body": body, "labels": [PIPELINE_ALERT_LABEL]},
+            {"title": title, "labels": [PIPELINE_ALERT_LABEL]},
         )
+        _github_request(
+            "POST",
+            f"https://api.github.com/repos/{repository}/issues/{match['number']}/comments",
+            token,
+            {"body": body},
+        )
+        for duplicate in existing_issues:
+            if duplicate.get("number") == match.get("number"):
+                continue
+            _github_request(
+                "POST",
+                f"https://api.github.com/repos/{repository}/issues/{duplicate['number']}/comments",
+                token,
+                {"body": f"Superseded by the stable incident issue #{match['number']}."},
+            )
+            _github_request(
+                "PATCH",
+                f"https://api.github.com/repos/{repository}/issues/{duplicate['number']}",
+                token,
+                {"state": "closed"},
+            )
         return
     _github_request(
         "POST",
@@ -163,13 +198,23 @@ def create_or_update_issue(repository: str, token: str, client_id: str, title: s
     )
 
 
-def close_open_pipeline_alert_issues(repository: str, token: str, client_id: str) -> None:
+def close_open_pipeline_alert_issues(
+    repository: str,
+    token: str,
+    client_id: str,
+    report_date: str | None = None,
+) -> None:
     for issue in list_open_pipeline_alert_issues(repository, token, client_id):
         _github_request(
             "POST",
             f"https://api.github.com/repos/{repository}/issues/{issue['number']}/comments",
             token,
-            {"body": "Closing automatically: the latest pipeline run completed cleanly."},
+            {
+                "body": (
+                    f"Resolved on {report_date or 'the latest run'}: "
+                    "the pipeline completed cleanly with no alertable checks."
+                )
+            },
         )
         _github_request(
             "PATCH",
@@ -212,8 +257,13 @@ def dispatch_alerts(
                 resolved_repository,
                 resolved_token,
                 config.client.id,
-                build_issue_title(config.client.id, decision.report_date),
-                build_markdown_summary(config.client.id, pipeline_status, decision.items),
+                build_issue_title(config.client.id),
+                build_markdown_summary(
+                    config.client.id,
+                    pipeline_status,
+                    decision.items,
+                    decision.report_date,
+                ),
             )
 
         if config.alerts.slack_webhook_env:
@@ -231,6 +281,11 @@ def dispatch_alerts(
         resolved_token = github_token or os.getenv("GITHUB_TOKEN")
         if not resolved_repository or not resolved_token:
             raise RuntimeError("GitHub issue closing requires GITHUB_REPOSITORY and GITHUB_TOKEN.")
-        close_open_pipeline_alert_issues(resolved_repository, resolved_token, config.client.id)
+        close_open_pipeline_alert_issues(
+            resolved_repository,
+            resolved_token,
+            config.client.id,
+            decision.report_date,
+        )
 
     return decision

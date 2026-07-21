@@ -16,7 +16,7 @@ MDMC deploys this platform per client:
 - connectors standardize source extracts
 - raw datasets land in BigQuery
 - transforms build marts for dashboarding and operations
-- quality checks monitor freshness, anomalies, and reconciliation drift
+- quality checks monitor presentation alignment, source watermarks, anomalies, and reconciliation drift
 - orchestration runs nightly
 - alerting routes issues before reporting breaks quietly
 
@@ -152,7 +152,25 @@ Behavior:
 - if `alerts.slack_webhook_env` names an exposed environment variable and that variable is set, send a compact Slack summary
 - on a fully clean run, close open `pipeline-alert` issues for that client with a resolution comment
 
-The public demo config keeps GitHub issue alerting off and does not set a Slack webhook by default.
+The public demo config keeps GitHub issue alerting on. The visible `pipeline-alert`
+issues are an intentional part of the demo: they show how one stable incident per
+client is updated across runs and resolved after a clean run. Slack remains unset
+by default.
+
+## Attribution scope and sample-data limitations
+
+The public demo has deliberate attribution limitations that should be understood
+before interpreting its metrics:
+
+- The GA4 extraction uses `traffic_source.*`, which represents first-user
+  acquisition in the GA4 export. Existing mart column names remain stable for the
+  Power BI schema contract, but they are not session-scoped campaign attribution.
+- Google documents the public ecommerce sample as obfuscated data with limited
+  internal consistency. It is useful for pipeline demonstrations, not for drawing
+  real business conclusions.
+- The synthetic ad and booking feeds derive their volume and scoping from that
+  public sample. They are declared-synthetic demonstrations, not independent live
+  platform observations.
 
 ## Adding A New Deployment
 

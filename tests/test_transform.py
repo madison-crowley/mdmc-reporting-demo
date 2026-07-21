@@ -4,6 +4,7 @@ from pathlib import Path
 
 from mdmc_platform.transform import (
     build_booking_window_sql,
+    build_source_max_date_union_sql,
     build_union_sql,
     planned_marts,
     render_sql_template,
@@ -88,6 +89,27 @@ def test_reconciliation_scopes_ga4_purchases_to_each_platforms_matched_campaigns
     assert "FROM `${daily_performance_table}`" not in sql
 
 
+def test_reconciliation_zero_baseline_states_are_explicit_and_flagged() -> None:
+    sql = render_sql_template(
+        "reconciliation",
+        {
+            "reconciliation_table": "demo.demo_marts.reconciliation",
+            "web_analytics_union_sql": "SELECT * FROM `demo.demo_raw.ga4`",
+            "ad_platform_union_sql": "SELECT * FROM `demo.demo_raw.ads`",
+            "max_source_date_union_sql": "SELECT source_date FROM `demo.demo_raw.ga4`",
+            "date_shift_enabled": "TRUE",
+            "reconciliation_threshold_pct": "8",
+        },
+    )
+
+    assert "WHEN ga4_purchases = 0 AND platform_conversions = 0 THEN 0" in sql
+    assert "WHEN ga4_purchases = 0 THEN NULL" in sql
+    assert "WHEN ga4_purchases = 0 THEN 'zero_baseline'" in sql
+    assert "ELSE 'normal'" in sql
+    assert "WHEN ga4_purchases = 0 THEN platform_conversions > 0" in sql
+    assert "END AS is_flagged" in sql
+
+
 def test_kpi_summary_uses_web_analytics_union_for_ga4_totals_instead_of_daily_performance_duplicates() -> None:
     overlapping_daily_performance = [
         {"date": "2021-01-01", "platform": "Google Ads", "campaign": "Holiday Search", "ga4_sessions": 120, "ga4_purchases": 10, "ga4_revenue": 200.0},
@@ -103,6 +125,7 @@ def test_kpi_summary_uses_web_analytics_union_for_ga4_totals_instead_of_daily_pe
             "web_analytics_union_sql": "SELECT * FROM `demo.demo_raw.ga4`",
             "ad_platform_union_sql": "SELECT * FROM `demo.demo_raw.ads`",
             "max_source_date_union_sql": "SELECT source_date FROM `demo.demo_raw.ga4`",
+            "source_max_date_union_sql": "SELECT 'web_analytics' AS source_category, DATE '2021-01-01' AS max_date",
             "date_shift_enabled": "TRUE",
             "reconciliation_threshold_pct": "8",
             "rolling_window_days": "28",
@@ -119,6 +142,10 @@ def test_kpi_summary_uses_web_analytics_union_for_ga4_totals_instead_of_daily_pe
     assert "FROM (\nSELECT * FROM `demo.demo_raw.ga4`" in sql
     assert "SUM(shifted_web_analytics.sessions) AS ga4_sessions" in sql
     assert "web_analytics_summary.ga4_sessions AS ga4_sessions" in sql
+    assert "source_max_dates AS" in sql
+    assert "MIN(max_date)" in sql
+    assert "performance.date BETWEEN watermark.window_start AND watermark.window_end" in sql
+    assert "shifted_web_analytics.date BETWEEN (SELECT window_start FROM watermark)" in sql
 
 
 def test_booking_funnel_uses_all_web_analytics_sessions_for_daily_ga4_totals() -> None:
@@ -179,4 +206,20 @@ def test_shared_booking_window_sql_builder_targets_real_tables() -> None:
     assert "SUM(appointments_booked) AS appointments_booked" in sql
     assert "SUM(no_shows) AS no_shows" in sql
     assert "FROM `demo.demo_marts.booking_funnel`" in sql
-    assert "MAX(date) FROM `demo.demo_marts.daily_performance`" in sql
+    assert "date BETWEEN (SELECT window_start FROM watermark)" in sql
+    assert "AND (SELECT window_end FROM watermark)" in sql
+
+
+def test_source_max_date_union_builds_one_shifted_max_per_category() -> None:
+    sql = build_source_max_date_union_sql(
+        {
+            "web_analytics": ["demo.raw.ga4"],
+            "ad_platform": ["demo.raw.google", "demo.raw.meta"],
+        }
+    )
+
+    assert "'web_analytics' AS source_category" in sql
+    assert "'ad_platform' AS source_category" in sql
+    assert "MAX(DATE_ADD(source_date" in sql
+    assert "demo.raw.google" in sql
+    assert "demo.raw.meta" in sql

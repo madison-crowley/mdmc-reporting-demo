@@ -29,7 +29,7 @@ transforms:
 
 quality:
   checks:
-    freshness:
+    presentation_alignment:
       max_lag_days: 0
     daily_performance_row_count:
       min_rows: 90

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 import sys
@@ -22,6 +23,27 @@ from mdmc_platform.warehouse import BigQueryWarehouse
 LOGGER = logging.getLogger(__name__)
 
 
+def build_extraction_metadata(warehouse, extract_result) -> dict[str, object]:
+    tables = []
+    rows_loaded = 0
+    for table in extract_result.tables:
+        row_count = int(
+            warehouse.query_scalar(
+                f"SELECT COUNT(*) AS row_count FROM `{table.table_fqn}`",
+                "row_count",
+            )
+        )
+        rows_loaded += row_count
+        tables.append({"table_fqn": table.table_fqn, "rows_loaded": row_count})
+    return {
+        "source_name": extract_result.source_name,
+        "source_category": extract_result.source_category,
+        "rows_loaded": rows_loaded,
+        "tables": tables,
+        "extracted_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the MDMC reporting platform pipeline.")
     parser.add_argument("--config", required=True, help="Path to a client deployment YAML config.")
@@ -38,6 +60,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parse_args()
     config: PipelineConfig | None = None
+    extraction_metadata: list[dict[str, object]] = []
     try:
         config = PipelineConfig.load(args.config)
         warehouse = BigQueryWarehouse(create_bigquery_client(config.project_id))
@@ -51,6 +74,7 @@ def main() -> int:
                 connector = build_connector(source, config)
                 extract_result = connector.extract(warehouse, extracts)
                 extracts.append(extract_result)
+                extraction_metadata.append(build_extraction_metadata(warehouse, extract_result))
                 LOGGER.info("Extracted %s via %s.", source.name, source.connector)
 
         transform_result = None
@@ -64,7 +88,14 @@ def main() -> int:
         if args.step in {"all", "checks"}:
             LOGGER.info("Running quality checks.")
             built_marts = transform_result.built_marts if transform_result else None
-            results, has_critical_failures = run_quality_checks(warehouse, config, built_marts)
+            results, has_critical_failures = run_quality_checks(
+                warehouse,
+                config,
+                built_marts,
+                extracts=extracts if args.step == "all" else None,
+                require_current_run_marts=args.step == "all",
+                report_metadata={"extractions": extraction_metadata},
+            )
             for result in results:
                 LOGGER.info(
                     "Check %-30s severity=%s passed=%s value=%s threshold=%s",
@@ -87,6 +118,7 @@ def main() -> int:
             config,
             [build_pipeline_failure_result(str(exc))],
             pipeline_status="failed",
+            metadata={"extractions": extraction_metadata},
         )
         return 1
 

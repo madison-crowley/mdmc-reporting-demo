@@ -3,16 +3,16 @@ from __future__ import annotations
 from mdmc_platform.connectors.base import BaseConnector, ExtractResult, ExtractedTable
 
 
-class Ga4BigQuerySampleConnector(BaseConnector):
-    registry_key = "ga4_bigquery_sample"
-    source_category = "web_analytics"
+def build_ga4_extraction_query() -> str:
+    """Build the public-sample GA4 SELECT using first-user acquisition fields.
 
-    def extract(self, warehouse, completed_extracts: list[ExtractResult]) -> ExtractResult:
-        del completed_extracts
-        table_name = self.source.params.get("table_name", self.build_table_name())
-        table_fqn = self.config.raw_table_fqn(table_name)
-        sql = f"""
-CREATE OR REPLACE TABLE `{table_fqn}` AS
+    ``traffic_source.*`` in the GA4 export describes first-user acquisition,
+    not session-scoped campaign attribution. Mart column names stay stable for
+    the downstream schema contract, but their attribution scope is first-user.
+    """
+    return """
+-- Attribution scope: traffic_source.* is first-user acquisition, not session-scoped attribution.
+-- The public GA4 sample is obfuscated and has limited internal consistency.
 WITH events AS (
   SELECT
     PARSE_DATE('%Y%m%d', event_date) AS source_date,
@@ -48,7 +48,20 @@ aggregated AS (
 )
 SELECT *
 FROM aggregated
-"""
+""".strip()
+
+
+class Ga4BigQuerySampleConnector(BaseConnector):
+    """Extract the obfuscated GA4 sample with first-user acquisition attribution."""
+
+    registry_key = "ga4_bigquery_sample"
+    source_category = "web_analytics"
+
+    def extract(self, warehouse, completed_extracts: list[ExtractResult]) -> ExtractResult:
+        del completed_extracts
+        table_name = self.source.params.get("table_name", self.build_table_name())
+        table_fqn = self.config.raw_table_fqn(table_name)
+        sql = f"CREATE OR REPLACE TABLE `{table_fqn}` AS\n{build_ga4_extraction_query()}"
         warehouse.run_sql(sql)
         return ExtractResult(
             source_name=self.source.name,
