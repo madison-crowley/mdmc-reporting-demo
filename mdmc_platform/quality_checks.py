@@ -162,9 +162,8 @@ def evaluate_presentation_alignment(
     return lag_days, bool(0 <= lag_days <= max_lag_days)
 
 
-def _shifted_source_max_dates(
+def _source_max_dates(
     warehouse,
-    config: PipelineConfig,
     extracts: list[ExtractResult] | None,
 ) -> tuple[dict[str, date | None], dict[str, date | None]]:
     raw_source_max_dates: dict[str, date | None] = {}
@@ -187,18 +186,8 @@ def _shifted_source_max_dates(
         else:
             raw_category_max_dates.setdefault(source_category, None)
 
-    present_dates = [value for value in raw_source_max_dates.values() if value is not None]
-    shift_days = 0
-    if config.transforms.date_shift and present_dates:
-        shift_days = ((date.today() - timedelta(days=1)) - max(present_dates)).days
-
-    def shifted(values: dict[str, date | None]) -> dict[str, date | None]:
-        return {
-            key: None if max_date is None else max_date + timedelta(days=shift_days)
-            for key, max_date in values.items()
-        }
-
-    return shifted(raw_source_max_dates), shifted(raw_category_max_dates)
+    # The common watermark is defined on observed source maxima, not the wall clock.
+    return raw_source_max_dates, raw_category_max_dates
 
 
 def _window_bounds(
@@ -280,7 +269,7 @@ def run_quality_checks(
     if require_current_run_marts:
         results.append(build_expected_marts_result(config, resolved_marts))
 
-    source_max_dates, source_category_max_dates = _shifted_source_max_dates(warehouse, config, extracts)
+    source_max_dates, source_category_max_dates = _source_max_dates(warehouse, extracts)
     window_start, window_end = _window_bounds(
         warehouse,
         config,
