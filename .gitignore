@@ -2,6 +2,9 @@
 **/.pbi/cache.abf
 __pycache__/
 .pytest_cache/
+.pytest-tmp/
 artifacts/
 .venv/
+.tools/
+.pnpm-store/
 *.pyc

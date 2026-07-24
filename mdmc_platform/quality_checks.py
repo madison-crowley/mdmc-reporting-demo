@@ -196,14 +196,8 @@ def _window_bounds(
     resolved_marts: tuple[str, ...],
     source_max_dates: dict[str, date | None],
 ) -> tuple[date | None, date | None]:
-    required_categories = configured_source_categories(config)
-    if required_categories and required_categories <= set(source_max_dates):
-        maxima = [source_max_dates[category] for category in required_categories]
-        if all(maximum is not None for maximum in maxima):
-            window_end = min(maximum for maximum in maxima if maximum is not None)
-            return window_end - timedelta(days=config.transforms.rolling_window_days - 1), window_end
-
     if "kpi_summary" in resolved_marts:
+        # The built summary is authoritative because its watermark includes transform date shifting.
         window_start = _normalize_date(
             warehouse.query_scalar(
                 f"SELECT window_start FROM `{config.mart_table_fqn('kpi_summary')}` LIMIT 1",
@@ -216,7 +210,15 @@ def _window_bounds(
                 "window_end",
             )
         )
-        return window_start, window_end
+        if window_start is not None and window_end is not None:
+            return window_start, window_end
+
+    required_categories = configured_source_categories(config)
+    if required_categories and required_categories <= set(source_max_dates):
+        maxima = [source_max_dates[category] for category in required_categories]
+        if all(maximum is not None for maximum in maxima):
+            window_end = min(maximum for maximum in maxima if maximum is not None)
+            return window_end - timedelta(days=config.transforms.rolling_window_days - 1), window_end
     return None, None
 
 

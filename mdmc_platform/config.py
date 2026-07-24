@@ -153,16 +153,24 @@ class PipelineConfig:
         if not sources:
             raise ConfigValidationError("sources must include at least one source.")
 
+        reconciliation_threshold_pct = _expect_int(
+            transforms_block.get("reconciliation_threshold_pct", 10),
+            path="transforms.reconciliation_threshold_pct",
+        )
+        if reconciliation_threshold_pct < 0:
+            raise ConfigValidationError("transforms.reconciliation_threshold_pct must be non-negative.")
+
+        rolling_window_days = _expect_int(
+            transforms_block.get("rolling_window_days", 28),
+            path="transforms.rolling_window_days",
+        )
+        if rolling_window_days < 2:
+            raise ConfigValidationError("transforms.rolling_window_days must be at least 2.")
+
         transforms = TransformSettings(
             date_shift=_expect_bool(transforms_block.get("date_shift"), path="transforms.date_shift"),
-            reconciliation_threshold_pct=_expect_int(
-                transforms_block.get("reconciliation_threshold_pct", 10),
-                path="transforms.reconciliation_threshold_pct",
-            ),
-            rolling_window_days=_expect_int(
-                transforms_block.get("rolling_window_days", 28),
-                path="transforms.rolling_window_days",
-            ),
+            reconciliation_threshold_pct=reconciliation_threshold_pct,
+            rolling_window_days=rolling_window_days,
         )
 
         checks_payload = quality_block.get("checks", {})

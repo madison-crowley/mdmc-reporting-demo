@@ -22,6 +22,8 @@ def test_ci_workflow_keeps_cloud_secrets_out_of_pytest_job_scope() -> None:
     job_header = workflow.split("steps:", 1)[0]
     pytest_step = workflow.split("- name: Run pytest", 1)[1].split("- name: Dry-run lint rendered SQL", 1)[0]
 
+    assert "push:" in workflow
+    assert "branches:\n      - main" in workflow
     assert "secrets.GCP_PROJECT_ID" not in job_header
     assert "secrets.GCP_SA_KEY" not in job_header
     assert "secrets.GCP_PROJECT_ID" not in pytest_step

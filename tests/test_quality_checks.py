@@ -14,6 +14,7 @@ from mdmc_platform.config import (
 )
 from mdmc_platform.connectors.base import ExtractedTable, ExtractResult
 from mdmc_platform.quality_checks import (
+    _window_bounds,
     build_expected_marts_result,
     evaluate_presentation_alignment,
     expected_marts_for_config,
@@ -103,6 +104,33 @@ def test_partial_source_categories_expect_correct_mart_subset() -> None:
     assert expected_marts_for_config(
         _config("ga4_bigquery_sample", "synthetic_ads", "synthetic_bookings")
     ) == ("daily_performance", "reconciliation", "kpi_summary", "booking_funnel")
+
+
+def test_window_bounds_prefers_built_kpi_summary_watermark() -> None:
+    config = _config("ga4_bigquery_sample", "synthetic_ads", "synthetic_bookings")
+
+    class _Warehouse:
+        def query_scalar(self, sql: str, field_name: str):
+            assert "kpi_summary" in sql
+            if field_name == "window_start":
+                return date(2026, 6, 25)
+            if field_name == "window_end":
+                return date(2026, 7, 22)
+            raise AssertionError(f"Unexpected query: {sql}")
+
+    window_start, window_end = _window_bounds(
+        _Warehouse(),
+        config,
+        ("kpi_summary",),
+        {
+            "web_analytics": date(2026, 7, 20),
+            "ad_platform": date(2026, 7, 19),
+            "booking_system": date(2026, 7, 20),
+        },
+    )
+
+    assert window_start == date(2026, 6, 25)
+    assert window_end == date(2026, 7, 22)
 
 
 def test_reconciliation_alert_uses_common_window_and_preserves_historical_total(monkeypatch) -> None:

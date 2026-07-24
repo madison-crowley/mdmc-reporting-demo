@@ -92,3 +92,42 @@ alerts:
 
     with pytest.raises(ConfigValidationError, match="Duplicate source name found"):
         PipelineConfig.load(config_path)
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "message"),
+    [
+        ("rolling_window_days", "1", "rolling_window_days must be at least 2"),
+        ("reconciliation_threshold_pct", "-1", "reconciliation_threshold_pct must be non-negative"),
+    ],
+)
+def test_config_rejects_invalid_transform_ranges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    setting: str,
+    value: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv("GCP_PROJECT_ID", "demo-project")
+    config_path = _write_config(
+        tmp_path / "invalid.yaml",
+        f"""
+client:
+  id: demo
+  display_name: Demo Client
+warehouse:
+  dataset_prefix: demo
+sources:
+  - name: ga4
+    connector: ga4_bigquery_sample
+    params: {{}}
+transforms:
+  date_shift: true
+  {setting}: {value}
+alerts:
+  github_issues: false
+""",
+    )
+
+    with pytest.raises(ConfigValidationError, match=message):
+        PipelineConfig.load(config_path)
