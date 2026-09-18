@@ -1,12 +1,14 @@
+# MDMC Managed Reporting Demo
+
+See which marketing efforts are bringing in bookings and revenue without piecing together reports from several tools. MDMC brings website, advertising, and booking data together, updates and checks the reporting data every night, and flags problems that need attention.
+
+[View the live dashboard →](https://app.powerbi.com/view?r=eyJrIjoiNjljMzcyYmUtZmFmZi00ZDI0LThjZGItNGY3ZjA1YjBiYTA1IiwidCI6IjZlZDU5N2Y4LTJmYTUtNGJkMC1hNjQzLWYwMDUxNGI5YWNjNCIsImMiOjF9&pageName=overview)
+
+![MDMC demo dashboard showing marketing performance, bookings, and revenue](docs/dashboard-owner-view.png)
+
+> This demo uses public and synthetic data. It does not contain customer data.
+
 [![Nightly Pipeline](https://github.com/madison-crowley/mdmc-reporting-demo/actions/workflows/pipeline.yml/badge.svg)](https://github.com/madison-crowley/mdmc-reporting-demo/actions/workflows/pipeline.yml)
-
-# MDMC Managed-Reporting Platform
-
-This repository is the public demo deployment of the actual config-driven reporting platform MDMC deploys and runs for clients.
-
-It is designed for multi-source marketing and operations reporting: web analytics, ad platforms, and booking systems land in BigQuery, are transformed into decision-ready marts, are checked nightly for quality, and are monitored with automated alerts. MDMC builds the system, owns the runbook, and manages it after launch.
-
-This repo is not a throwaway sample. It is the public-facing deployment of the same platform pattern behind MDMC’s build-then-manage service.
 
 ## What This Is
 
