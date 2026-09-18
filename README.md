@@ -10,189 +10,45 @@ See which marketing efforts are bringing in bookings and revenue without piecing
 
 [![Nightly Pipeline](https://github.com/madison-crowley/mdmc-reporting-demo/actions/workflows/pipeline.yml/badge.svg)](https://github.com/madison-crowley/mdmc-reporting-demo/actions/workflows/pipeline.yml)
 
-## What This Is
+## What the Demo Shows
 
-MDMC deploys this platform per client:
+The dashboard helps an owner see:
 
-- configuration defines the deployment
-- connectors standardize source extracts
-- raw datasets land in BigQuery
-- transforms build marts for dashboarding and operations
-- quality checks monitor presentation alignment, source watermarks, anomalies, and reconciliation drift
-- orchestration runs nightly
-- alerting routes issues before reporting breaks quietly
+- which marketing efforts are contributing to bookings and revenue
+- where advertising and website numbers disagree
+- how visits move through the booking journey
+- which reporting issues need attention
 
-The deployment included here is the public demo config at `configs/demo.yaml`.
+The public demo combines Google’s public GA4 sample data with clearly labeled synthetic advertising and booking data. No client data is included.
 
-## What Is In This Demo
+## How a Client Deployment Differs
 
-This public repository uses only public or synthetic data:
+A client deployment follows the same reporting flow but replaces the demo inputs with live business systems. It uses private client settings, a client-specific data environment, and agreed alert channels. Client data remains outside this public repository.
 
-- Google’s public GA4 sample dataset from BigQuery
-- clearly labeled synthetic ad-platform feeds
-- clearly labeled synthetic booking-system feeds
-
-No client data is present in this repository.
-
-The synthetic feeds are intentional. They are calibrated to show the two reporting problems most buyers already feel in practice:
-
-1. Ad platforms and analytics never agree.
-The reconciliation mart quantifies the gap between platform-reported conversions and analytics-side purchases instead of hiding it.
-
-2. Attribution leakage makes booked revenue hard to tie back to spend.
-The booking funnel mart crosses paid media, analytics sessions, bookings, completions, and revenue into one daily operating view.
-
-## How A Client Deployment Differs
-
-Each real client deployment keeps the same platform core but swaps in client-specific settings and live systems:
-
-- a private config instead of the public demo config
-- live Meta / Google Ads connectors instead of demo synthetic ad feeds
-- live Square / Mindbody / other booking or POS connectors instead of demo synthetic booking feeds
-- the client’s BigQuery project and dataset namespace
-- the client’s alert routing, GitHub issue policy, and Slack webhook exposure
-
-The public repo stays honest about the difference: the code pattern is real, the deployment config is public, and the data in this repo is demo-safe.
-
-## Architecture
+## How It Works
 
 ```mermaid
 flowchart LR
-    A["Deployment Config<br/>configs/demo.yaml"] --> B["Connector Registry<br/>mdmc_platform/connectors"]
-    B --> C["Raw Layer<br/>client_raw datasets"]
-    C --> D["Transforms<br/>sql/*.sql + transform.py"]
-    D --> E["Marts<br/>client_marts datasets"]
-    E --> F["Quality Checks<br/>quality_checks.py"]
-    F --> G["Alerts<br/>alerts.py + GitHub Actions"]
+    A["Website, advertising,<br/>and booking data"] --> B["BigQuery"]
+    B --> C["Reporting tables"]
+    C --> D["Data quality checks"]
+    D --> E["Power BI dashboard"]
+    D --> F["Issue alerts"]
 ```
 
-The architecture is intentionally config-driven:
+The data pipeline runs nightly to gather and prepare reporting data, run quality checks, and flag issues. Power BI refresh is managed separately from the scheduled data pipeline.
 
-- config determines the deployment
-- connectors determine how sources are materialized
-- SQL expresses business logic
-- Python handles execution, validation, and orchestration
+## About the Demo Data
 
-That makes it practical to deploy the same platform shape repeatedly without rebuilding the core for every client.
+The demo is designed to show the reporting experience, not to support real business decisions:
 
-## How It Runs
+- The GA4 sample identifies first-user acquisition rather than session-level campaign attribution.
+- Google’s public ecommerce sample is intentionally obfuscated and has limited internal consistency.
+- Advertising and booking feeds are synthetic and shaped for demonstration purposes.
 
-The main entrypoint is `scripts/run_pipeline.py`.
+## For Developers
 
-A full run does the following:
-
-1. Load the selected deployment config
-2. Run configured connectors into `<dataset_prefix>_raw`
-3. Build marts in `<dataset_prefix>_marts`
-4. Execute quality checks
-5. Write `artifacts/quality_report.json`
-6. Let GitHub Actions upload the report and dispatch alerts
-
-## Local Setup
-
-Required environment variables:
-
-- `GCP_PROJECT_ID`
-- `GCP_SA_KEY` as raw service-account JSON
-
-Typical setup:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-## Local Commands
-
-Run the full pipeline:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\run_pipeline.py --config configs/demo.yaml --step all
-```
-
-Run individual stages:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\run_pipeline.py --config configs/demo.yaml --step extract
-.\.venv\Scripts\python.exe scripts\run_pipeline.py --config configs/demo.yaml --step transform
-.\.venv\Scripts\python.exe scripts\run_pipeline.py --config configs/demo.yaml --step checks
-```
-
-Dry-run lint the rendered BigQuery SQL:
-
-```powershell
-.\.venv\Scripts\python.exe scripts\lint_sql.py --config configs/demo.yaml
-```
-
-## Nightly Orchestration
-
-The reusable deployment workflow is `.github/workflows/pipeline.yml`.
-
-It runs:
-
-- nightly at `07:00 UTC`
-- manually via `workflow_dispatch`
-
-The workflow accepts a config path input, defaulting to `configs/demo.yaml`, so the workflow is deployment-oriented rather than demo-specific.
-
-Each run:
-
-- checks out the repo
-- sets up Python 3.11 with pip cache
-- installs dependencies
-- runs `scripts/run_pipeline.py --config <input> --step all`
-- uploads `artifacts/quality_report.json`
-- dispatches GitHub and Slack alerting from the config’s `alerts` block
-
-## Alerting
-
-Alerting is driven by the `alerts` block in each deployment config.
-
-Behavior:
-
-- on pipeline failure, CRITICAL failure, or WARN items, create or update a GitHub issue labeled `pipeline-alert`
-- if `alerts.slack_webhook_env` names an exposed environment variable and that variable is set, send a compact Slack summary
-- on a fully clean run, close open `pipeline-alert` issues for that client with a resolution comment
-
-The public demo config keeps GitHub issue alerting on. The visible `pipeline-alert`
-issues are an intentional part of the demo: they show how one stable incident per
-client is updated across runs and resolved after a clean run. Slack remains unset
-by default.
-
-## Attribution scope and sample-data limitations
-
-The public demo has deliberate attribution limitations that should be understood
-before interpreting its metrics:
-
-- The GA4 extraction uses `traffic_source.*`, which represents first-user
-  acquisition in the GA4 export. Existing mart column names remain stable for the
-  Power BI schema contract, but they are not session-scoped campaign attribution.
-- Google documents the public ecommerce sample as obfuscated data with limited
-  internal consistency. It is useful for pipeline demonstrations, not for drawing
-  real business conclusions.
-- The synthetic ad and booking feeds derive their volume and scoping from that
-  public sample. They are declared-synthetic demonstrations, not independent live
-  platform observations.
-
-## Adding A New Deployment
-
-To add a deployment:
-
-1. Add a new YAML config
-2. Point the workflow `config_path` input at that config
-3. Expose the required GCP and alerting secrets/env vars
-4. If the source mix is new, add and register a connector
-
-In the normal case, a new deployment should mean new config and connector selection, not core-platform rewrites.
-
-## Continuous Integration
-
-Pull requests run `.github/workflows/ci.yml`, which:
-
-- runs `pytest`
-- performs a BigQuery dry-run lint pass against the rendered SQL
-
-This gives fast feedback on both Python behavior and warehouse-query validity before deployment changes ship.
+See the [development guide](docs/development.md) for local setup, pipeline commands, nightly orchestration, alerting, continuous integration, and deployment configuration.
 
 ---
 
